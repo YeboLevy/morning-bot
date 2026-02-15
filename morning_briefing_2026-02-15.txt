@@ -1,0 +1,40 @@
+============================================================
+  MORNING BRIEFING  —  Sunday, February 15, 2026
+============================================================
+  Good afternoon, Andrew! Here's what's happening today.
+============================================================
+
+--- SPENDING SUMMARY ---------------------------------------
+
+  Month-to-date total:  $488.74  (10 transactions)
+
+  By category:
+    Food           $  171.25  [########                ]
+    Bills          $  120.00  [#####                   ]
+    Shopping       $   89.99  [####                    ]
+    Entertainment  $   80.00  [###                     ]
+    Transport      $   27.50  [#                       ]
+
+  Recent transactions:
+    2026-02-05  Food            $  34.80  Restaurant
+    2026-02-05  Entertainment   $  25.00  Streaming subscription
+    2026-02-04  Transport       $  15.50  Gas
+
+--- TODAY'S MEETINGS ---------------------------------------
+
+  2 meetings today:
+
+  1.  Test
+       04:00 PM – 04:45 PM  (45 min)
+
+  2.  test 2
+       04:00 PM – 04:23 PM  (23 min)
+
+--- MOOD TREND (Last 7 Days) -------------------------------
+
+  [!] File not found: /Users/admin/Desktop/Learning To Code/daily-journal/journal.json
+
+============================================================
+  Generated at 2026-02-15 16:47:29
+  Have a productive day!
+============================================================
