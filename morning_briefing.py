@@ -1,5 +1,5 @@
 # ============================================================
-# morning_briefing.py — A Morning Briefing Bot
+# morning_briefing.py — A Morning Briefing Bot with LIVE DATA
 #
 # BOT PATTERN: A bot is a program that runs automatically,
 # gathers information from multiple sources, and presents
@@ -7,202 +7,366 @@
 #
 # This bot follows three clear steps every time it runs:
 #
-#   GATHER  → Read raw data from files (expenses, meetings, journal)
+#   GATHER  → Fetch LIVE data from APIs (weather, news, currency)
 #   PROCESS → Transform raw data into useful summaries
 #   PRESENT → Format everything into a beautiful report
+#
+# APIs used:
+#   • Open-Meteo API — Free weather data (no key needed)
+#   • NewsAPI — Top headlines (requires API key)
+#   • ExchangeRate-API — Currency rates (no key needed)
 #
 # Run it each morning with: python morning_briefing.py
 # ============================================================
 
 import os
-import csv
 import json
-from collections import defaultdict
-from datetime import datetime, timedelta
+import requests  # For making HTTP API calls
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# ── Load .env so we can use variables like USER_NAME ────────
+# ── Load .env so we can use variables like USER_NAME and API keys ──
 # python-dotenv reads the .env file and injects its key=value
 # pairs into the environment so os.getenv() can find them.
 load_dotenv()
 
 # ============================================================
 # CONFIGURATION
-# One place to change file paths if anything moves.
+# API endpoints and local settings
 # ============================================================
 
-BASE_DIR       = Path.home() / "Desktop" / "Learning To Code"
-EXPENSE_FILE   = BASE_DIR / "expense-tracker"  / "expenses.csv"
-MEETINGS_FILE  = BASE_DIR / "meeting-planner"  / "meetings.json"
-JOURNAL_FILE   = BASE_DIR / "daily-journal"    / "journal.json"
+# API endpoints (all free to use!)
+WEATHER_API_URL  = "https://api.open-meteo.com/v1/forecast"
+NEWS_API_URL     = "https://newsapi.org/v2/top-headlines"
+CURRENCY_API_URL = "https://api.exchangerate-api.com/v4/latest/USD"
 
-TODAY          = datetime.now().date()
-TODAY_STR      = TODAY.strftime("%Y-%m-%d")
-REPORT_FILE    = Path(__file__).parent / f"morning_briefing_{TODAY_STR}.txt"
+# Johannesburg coordinates for weather API
+JHB_LATITUDE     = -26.2041
+JHB_LONGITUDE    = 28.0473
+
+# Date and file paths
+TODAY            = datetime.now().date()
+TODAY_STR        = TODAY.strftime("%Y-%m-%d")
+REPORT_FILE      = Path(__file__).parent / f"morning_briefing_{TODAY_STR}.txt"
+
+# Request timeout for all API calls (seconds)
+API_TIMEOUT      = 10
 
 # ============================================================
 # STEP 1 — GATHER
-# Each gather_* function opens one data source and returns:
+# Each gather_* function fetches LIVE data from an API and returns:
 #   (data, error_message)
-# If the file is missing or broken, data is empty and
+# If the API fails or network is down, data is empty and
 # error_message explains what went wrong — so the rest of
 # the bot keeps running instead of crashing.
 # ============================================================
 
-def gather_expenses():
-    """GATHER: Read all rows from expenses.csv into a list of dicts."""
+def gather_weather():
+    """
+    GATHER: Fetch LIVE weather data from Open-Meteo API.
+
+    Open-Meteo is a free weather API that needs NO API KEY!
+    We request:
+      • Current temperature and weather condition
+      • Hourly forecasts for today (to find best running time)
+      • Wind speed, precipitation probability
+
+    API Docs: https://open-meteo.com/en/docs
+
+    Returns: (weather_data_dict, error_message)
+    """
     try:
-        expenses = []
-        with open(EXPENSE_FILE, newline="") as f:
-            for row in csv.DictReader(f):
-                expenses.append({
-                    "date":        row["date"],
-                    "category":    row["category"],
-                    "amount":      float(row["amount"]),   # convert string → number
-                    "description": row["description"],
-                })
-        return expenses, None
-    except FileNotFoundError:
-        return [], f"File not found: {EXPENSE_FILE}"
+        # Build API request parameters
+        params = {
+            "latitude":  JHB_LATITUDE,
+            "longitude": JHB_LONGITUDE,
+            "current": [
+                "temperature_2m",           # Current temp in °C
+                "weather_code",             # WMO weather code (0=clear, 1-3=clouds, etc.)
+                "wind_speed_10m",           # Wind speed
+            ],
+            "hourly": [
+                "temperature_2m",           # Hourly temps for today
+                "precipitation_probability", # Rain chance each hour
+                "wind_speed_10m",           # Wind speed each hour
+            ],
+            "timezone": "Africa/Johannesburg",
+            "forecast_days": 1,             # Only need today
+        }
+
+        # Make the HTTP GET request with a 10-second timeout
+        response = requests.get(WEATHER_API_URL, params=params, timeout=API_TIMEOUT)
+
+        # Raise an exception if the status code indicates an error (404, 500, etc.)
+        response.raise_for_status()
+
+        # Parse JSON response
+        data = response.json()
+
+        return data, None
+
+    except requests.exceptions.Timeout:
+        return {}, "Weather API timed out (slow network)"
+    except requests.exceptions.ConnectionError:
+        return {}, "Could not connect to weather API (check internet)"
+    except requests.exceptions.HTTPError as e:
+        return {}, f"Weather API error: {e}"
     except Exception as e:
-        return [], f"Could not read expenses: {e}"
+        return {}, f"Unexpected weather error: {e}"
 
 
-def gather_meetings():
-    """GATHER: Read meetings.json and parse ISO 8601 datetimes."""
+def gather_news():
+    """
+    GATHER: Fetch top headlines from NewsAPI.
+
+    NewsAPI provides breaking news from 80,000+ sources.
+    Requires an API key (get free at: https://newsapi.org)
+
+    We fetch:
+      • Top 3 technology headlines (worldwide)
+      • Top 3 business headlines for South Africa
+
+    API Docs: https://newsapi.org/docs/endpoints/top-headlines
+
+    Returns: (news_dict, error_message)
+    """
+    # Read API key from environment variable
+    api_key = os.getenv("NEWS_API_KEY")
+
+    if not api_key:
+        return {}, "NEWS_API_KEY not found in .env file"
+
     try:
-        with open(MEETINGS_FILE) as f:
-            raw_list = json.load(f)
+        # Fetch technology news (worldwide, English)
+        tech_params = {
+            "apiKey":   api_key,
+            "category": "technology",
+            "language": "en",
+            "pageSize": 3,              # Only top 3 articles
+        }
+        tech_response = requests.get(NEWS_API_URL, params=tech_params, timeout=API_TIMEOUT)
+        tech_response.raise_for_status()
+        tech_data = tech_response.json()
 
-        meetings = []
-        for raw in raw_list:
-            meetings.append({
-                "title":            raw["title"],
-                # fromisoformat() converts "2026-02-15T14:00:00+00:00" → datetime object
-                "start":            datetime.fromisoformat(raw["start"]),
-                "duration_minutes": raw["duration_minutes"],
-                "notes":            raw.get("notes", ""),
-            })
-        return meetings, None
-    except FileNotFoundError:
-        return [], f"File not found: {MEETINGS_FILE}"
+        # Fetch business news for South Africa
+        biz_params = {
+            "apiKey":   api_key,
+            "category": "business",
+            "country":  "za",           # ISO code for South Africa
+            "pageSize": 3,
+        }
+        biz_response = requests.get(NEWS_API_URL, params=biz_params, timeout=API_TIMEOUT)
+        biz_response.raise_for_status()
+        biz_data = biz_response.json()
+
+        return {
+            "tech": tech_data.get("articles", []),
+            "business": biz_data.get("articles", []),
+        }, None
+
+    except requests.exceptions.Timeout:
+        return {}, "News API timed out"
+    except requests.exceptions.ConnectionError:
+        return {}, "Could not connect to News API"
+    except requests.exceptions.HTTPError as e:
+        # Check if it's an auth error (401) or quota exceeded (429)
+        if e.response.status_code == 401:
+            return {}, "Invalid NEWS_API_KEY (check your .env file)"
+        elif e.response.status_code == 429:
+            return {}, "News API quota exceeded (upgrade at newsapi.org)"
+        else:
+            return {}, f"News API error: {e}"
     except Exception as e:
-        return [], f"Could not read meetings: {e}"
+        return {}, f"Unexpected news error: {e}"
 
 
-def gather_journal():
-    """GATHER: Read journal.json into a list of entry dicts."""
+def gather_currency():
+    """
+    GATHER: Fetch live currency exchange rates.
+
+    ExchangeRate-API provides free currency data with NO API KEY needed!
+    We fetch the latest USD rates and extract ZAR conversions.
+
+    Currencies we track:
+      • USD to ZAR (US Dollar → South African Rand)
+      • EUR to ZAR (Euro → Rand)
+      • GBP to ZAR (British Pound → Rand)
+
+    API Docs: https://www.exchangerate-api.com
+
+    Returns: (rates_dict, error_message)
+    """
     try:
-        with open(JOURNAL_FILE) as f:
-            entries = json.load(f)
-        return entries, None
-    except FileNotFoundError:
-        return [], f"File not found: {JOURNAL_FILE}"
+        # Fetch latest rates with USD as base currency
+        response = requests.get(CURRENCY_API_URL, timeout=API_TIMEOUT)
+        response.raise_for_status()
+
+        data = response.json()
+
+        # Extract the rates we care about
+        # rates["ZAR"] = how many ZAR for 1 USD
+        # rates["EUR"] = how many EUR for 1 USD
+        # To get EUR→ZAR, we calculate: ZAR / EUR
+        rates = data.get("rates", {})
+
+        usd_to_zar = rates.get("ZAR", 0)
+        eur_to_zar = usd_to_zar / rates.get("EUR", 1) if rates.get("EUR") else 0
+        gbp_to_zar = usd_to_zar / rates.get("GBP", 1) if rates.get("GBP") else 0
+
+        return {
+            "USD_ZAR": usd_to_zar,
+            "EUR_ZAR": eur_to_zar,
+            "GBP_ZAR": gbp_to_zar,
+            "last_updated": data.get("date", "unknown"),
+        }, None
+
+    except requests.exceptions.Timeout:
+        return {}, "Currency API timed out"
+    except requests.exceptions.ConnectionError:
+        return {}, "Could not connect to currency API"
+    except requests.exceptions.HTTPError as e:
+        return {}, f"Currency API error: {e}"
     except Exception as e:
-        return [], f"Could not read journal: {e}"
+        return {}, f"Unexpected currency error: {e}"
 
 
 # ============================================================
 # STEP 2 — PROCESS
-# Each process_* function takes raw gathered data and computes
-# something useful from it: totals, filters, counts, trends.
-# Pure calculation — no file I/O, no printing here.
+# Each process_* function takes raw API data and computes
+# something useful from it: summaries, best times, formatting.
+# Pure calculation — no API calls, no printing here.
 # ============================================================
 
-def process_expenses(expenses):
-    """PROCESS: Summarise spending for the current month."""
-    if not expenses:
+def process_weather(weather_data):
+    """
+    PROCESS: Analyze weather data and find best running time.
+
+    Running criteria (good conditions):
+      • Temperature: 10-25°C (50-77°F)
+      • Low wind speed: < 20 km/h
+      • Low rain chance: < 30%
+
+    Returns summary with current conditions and best running hour.
+    """
+    if not weather_data:
         return None
 
-    # Keep only entries from this calendar month
-    current_month = TODAY.strftime("%Y-%m")
-    monthly = [e for e in expenses if e["date"].startswith(current_month)]
+    try:
+        current = weather_data.get("current", {})
+        hourly = weather_data.get("hourly", {})
 
-    if not monthly:
+        # Current weather
+        temp_now = current.get("temperature_2m", 0)
+        wind_now = current.get("wind_speed_10m", 0)
+        weather_code = current.get("weather_code", 0)
+
+        # Decode WMO weather code into readable condition
+        # 0 = Clear, 1-3 = Partly cloudy, 45-48 = Fog, 51-67 = Rain, 71-86 = Snow, 95-99 = Thunderstorm
+        if weather_code == 0:
+            condition = "Clear skies"
+        elif weather_code <= 3:
+            condition = "Partly cloudy"
+        elif weather_code <= 48:
+            condition = "Foggy"
+        elif weather_code <= 67:
+            condition = "Rainy"
+        elif weather_code <= 86:
+            condition = "Snowy"
+        else:
+            condition = "Stormy"
+
+        # Find best running time (check 6 AM - 8 PM)
+        best_hour = None
+        best_score = -1
+
+        hours = hourly.get("time", [])
+        temps = hourly.get("temperature_2m", [])
+        rain_probs = hourly.get("precipitation_probability", [])
+        winds = hourly.get("wind_speed_10m", [])
+
+        for i, hour_str in enumerate(hours):
+            hour = int(hour_str.split("T")[1].split(":")[0])  # Extract hour from ISO time
+
+            # Only consider daytime hours (6 AM - 8 PM)
+            if hour < 6 or hour >= 20:
+                continue
+
+            temp = temps[i]
+            rain = rain_probs[i]
+            wind = winds[i]
+
+            # Score this hour (higher = better)
+            score = 0
+            if 10 <= temp <= 25:  # Ideal temp
+                score += 3
+            elif 8 <= temp <= 28:  # Acceptable
+                score += 1
+
+            if rain < 30:  # Low rain chance
+                score += 2
+            if wind < 20:  # Low wind
+                score += 1
+
+            if score > best_score:
+                best_score = score
+                best_hour = hour
+
+        # Determine if it's good running weather
+        if best_score >= 4:
+            running_advice = f"Great running weather! Best time: {best_hour}:00"
+        elif best_score >= 2:
+            running_advice = f"Decent conditions. Try {best_hour}:00 if you can"
+        else:
+            running_advice = "Not ideal for running today (weather)"
+
+        return {
+            "temperature": temp_now,
+            "condition": condition,
+            "wind_speed": wind_now,
+            "best_running_time": running_advice,
+        }
+
+    except (KeyError, IndexError, ValueError):
         return None
 
-    total = sum(e["amount"] for e in monthly)
 
-    # Group spending by category
-    by_category = defaultdict(float)
-    for e in monthly:
-        by_category[e["category"]] += e["amount"]
+def process_news(news_data):
+    """PROCESS: Extract article titles and sources from news data."""
+    if not news_data:
+        return None
 
-    # Sort categories highest → lowest
-    sorted_categories = sorted(by_category.items(), key=lambda x: x[1], reverse=True)
+    tech_articles = []
+    for article in news_data.get("tech", [])[:3]:
+        tech_articles.append({
+            "title": article.get("title", "No title"),
+            "source": article.get("source", {}).get("name", "Unknown"),
+        })
 
-    # Most recent three expenses (sorted by date, newest first)
-    recent = sorted(expenses, key=lambda x: x["date"], reverse=True)[:3]
+    biz_articles = []
+    for article in news_data.get("business", [])[:3]:
+        biz_articles.append({
+            "title": article.get("title", "No title"),
+            "source": article.get("source", {}).get("name", "Unknown"),
+        })
 
     return {
-        "total":          total,
-        "by_category":    sorted_categories,
-        "recent":         recent,
-        "count":          len(monthly),
+        "tech": tech_articles,
+        "business": biz_articles,
     }
 
 
-def process_meetings(meetings):
-    """PROCESS: Filter meetings to today and compute end times."""
-    today_meetings = []
-    for m in meetings:
-        # Convert UTC datetime to local system timezone before comparing dates
-        local_start = m["start"].astimezone()
-        if local_start.date() == TODAY:
-            end_time = local_start + timedelta(minutes=m["duration_minutes"])
-            today_meetings.append({
-                "title":            m["title"],
-                "start":            local_start,
-                "end":              end_time,
-                "duration_minutes": m["duration_minutes"],
-                "notes":            m["notes"],
-            })
-
-    # Earliest meeting first
-    today_meetings.sort(key=lambda x: x["start"])
-    return today_meetings
-
-
-def process_journal(entries):
-    """PROCESS: Count moods and build a 7-day trend."""
-    if not entries:
+def process_currency(rates_data):
+    """PROCESS: Format currency rates for display."""
+    if not rates_data:
         return None
-
-    # Only include entries from the last 7 days
-    cutoff = TODAY - timedelta(days=7)
-    recent = []
-    for e in entries:
-        try:
-            entry_date = datetime.strptime(e["date"], "%Y-%m-%d %H:%M").date()
-            if entry_date >= cutoff:
-                recent.append({
-                    "date":  entry_date,
-                    "mood":  e["mood"],
-                    "text":  e.get("text", ""),
-                })
-        except ValueError:
-            continue  # skip any entry with an unexpected date format
-
-    if not recent:
-        return None
-
-    # Count how many times each mood appears
-    mood_counts = defaultdict(int)
-    for e in recent:
-        mood_counts[e["mood"]] += 1
-
-    dominant_mood = max(mood_counts, key=mood_counts.get)
-
-    # Sort newest → oldest for display
-    recent.sort(key=lambda x: x["date"], reverse=True)
 
     return {
-        "entries":       recent,
-        "mood_counts":   dict(mood_counts),
-        "dominant_mood": dominant_mood,
-        "total_entries": len(recent),
+        "USD_ZAR": rates_data.get("USD_ZAR", 0),
+        "EUR_ZAR": rates_data.get("EUR_ZAR", 0),
+        "GBP_ZAR": rates_data.get("GBP_ZAR", 0),
+        "last_updated": rates_data.get("last_updated", "unknown"),
     }
 
 
@@ -239,102 +403,83 @@ def present_header():
     ])
 
 
-def present_expenses(summary, error):
-    """PRESENT: Spending summary with category bars and recent transactions."""
-    lines = ["--- SPENDING SUMMARY " + "-" * 39, ""]
+def present_weather(summary, error):
+    """PRESENT: Current weather and best running time."""
+    lines = ["--- WEATHER IN JOHANNESBURG " + "-" * 32, ""]
 
     if error:
         lines += [f"  [!] {error}", ""]
         return "\n".join(lines)
 
     if not summary:
-        lines += ["  No expense data found for this month.", ""]
+        lines += ["  No weather data available.", ""]
         return "\n".join(lines)
 
-    lines.append(
-        f"  Month-to-date total:  ${summary['total']:.2f}"
-        f"  ({summary['count']} transactions)"
-    )
+    lines.append(f"  Current:      {summary['temperature']:.1f}°C — {summary['condition']}")
+    lines.append(f"  Wind:         {summary['wind_speed']:.1f} km/h")
     lines.append("")
-    lines.append("  By category:")
-
-    for category, amount in summary["by_category"]:
-        # Simple ASCII bar proportional to share of spending
-        share   = amount / summary["total"] if summary["total"] else 0
-        bar     = "#" * int(share * 24)
-        lines.append(f"    {category:<14} ${amount:>8.2f}  [{bar:<24}]")
-
+    lines.append(f"  🏃 {summary['best_running_time']}")
     lines.append("")
-    lines.append("  Recent transactions:")
-    for e in summary["recent"]:
-        lines.append(
-            f"    {e['date']}  {e['category']:<14}"
-            f"  ${e['amount']:>7.2f}  {e['description']}"
-        )
 
-    lines.append("")
     return "\n".join(lines)
 
 
-def present_meetings(today_meetings, error):
-    """PRESENT: Today's meetings with times, duration and notes."""
-    lines = ["--- TODAY'S MEETINGS " + "-" * 39, ""]
+def present_news(summary, error):
+    """PRESENT: Top headlines from tech and business."""
+    lines = ["--- NEWS HEADLINES " + "-" * 41, ""]
 
     if error:
         lines += [f"  [!] {error}", ""]
         return "\n".join(lines)
 
-    if not today_meetings:
-        lines += ["  No meetings scheduled today. Enjoy the clear calendar!", ""]
+    if not summary:
+        lines += ["  No news available.", ""]
         return "\n".join(lines)
 
-    count = len(today_meetings)
-    lines.append(f"  {count} meeting{'s' if count != 1 else ''} today:")
-    lines.append("")
+    # Technology news
+    lines.append("  TECHNOLOGY:")
+    if summary.get("tech"):
+        for i, article in enumerate(summary["tech"], 1):
+            lines.append(f"  {i}. {article['title']}")
+            lines.append(f"     — {article['source']}")
+            lines.append("")
+    else:
+        lines.append("     No tech news available.")
+        lines.append("")
 
-    for i, m in enumerate(today_meetings, 1):
-        start_str = m["start"].strftime("%I:%M %p")
-        end_str   = m["end"].strftime("%I:%M %p")
-        lines.append(f"  {i}.  {m['title']}")
-        lines.append(f"       {start_str} – {end_str}  ({m['duration_minutes']} min)")
-        if m["notes"]:
-            lines.append(f"       Notes: {m['notes']}")
+    # Business news
+    lines.append("  BUSINESS (South Africa):")
+    if summary.get("business"):
+        for i, article in enumerate(summary["business"], 1):
+            lines.append(f"  {i}. {article['title']}")
+            lines.append(f"     — {article['source']}")
+            lines.append("")
+    else:
+        lines.append("     No business news available.")
         lines.append("")
 
     return "\n".join(lines)
 
 
-def present_journal(analysis, error):
-    """PRESENT: 7-day mood trend with a bar chart and recent entry snippets."""
-    lines = ["--- MOOD TREND (Last 7 Days) " + "-" * 31, ""]
+def present_currency(summary, error):
+    """PRESENT: Live currency exchange rates."""
+    lines = ["--- CURRENCY RATES " + "-" * 41, ""]
 
     if error:
         lines += [f"  [!] {error}", ""]
         return "\n".join(lines)
 
-    if not analysis:
-        lines += ["  No journal entries found in the last 7 days.", ""]
+    if not summary:
+        lines += ["  No currency data available.", ""]
         return "\n".join(lines)
 
-    lines.append(f"  Entries this week:  {analysis['total_entries']}")
-    lines.append(f"  Dominant mood:      {analysis['dominant_mood'].upper()}")
+    lines.append(f"  1 USD  =  R {summary['USD_ZAR']:.2f}")
+    lines.append(f"  1 EUR  =  R {summary['EUR_ZAR']:.2f}")
+    lines.append(f"  1 GBP  =  R {summary['GBP_ZAR']:.2f}")
     lines.append("")
-    lines.append("  Mood breakdown:")
-
-    for mood in ["happy", "neutral", "sad"]:
-        count = analysis["mood_counts"].get(mood, 0)
-        bar   = "*" * count
-        lines.append(f"    {mood:<8}  {bar:<10}  ({count})")
-
+    lines.append(f"  Last updated: {summary['last_updated']}")
     lines.append("")
-    lines.append("  Recent entries:")
 
-    for e in analysis["entries"][:5]:   # show up to 5 most recent
-        date_str = e["date"].strftime("%b %d")
-        snippet  = e["text"][:52] + "..." if len(e["text"]) > 52 else e["text"]
-        lines.append(f"    {date_str}  [{e['mood']:<7}]  {snippet}")
-
-    lines.append("")
     return "\n".join(lines)
 
 
@@ -352,38 +497,38 @@ def present_footer():
 # ============================================================
 # MAIN — Orchestrate the three-step bot pattern
 #
-#   GATHER   → collect raw data (may fail gracefully)
-#   PROCESS  → compute summaries from raw data
-#   PRESENT  → format summaries into a human-readable report
-#   SAVE     → write report to a dated .txt file
+#   GATHER   → Fetch LIVE data from APIs (may fail gracefully)
+#   PROCESS  → Compute summaries from raw API data
+#   PRESENT  → Format summaries into a human-readable report
+#   SAVE     → Write report to a dated .txt file
 # ============================================================
 
 def main():
-    print("Starting Morning Briefing Bot…\n")
+    print("Starting Morning Briefing Bot with LIVE DATA…\n")
 
     # ── GATHER ──────────────────────────────────────────────
-    # Read every data source. Errors are captured, not raised,
-    # so a missing file never stops the whole report.
-    print("  [1/3] Gathering data…")
-    raw_expenses,  expense_error  = gather_expenses()
-    raw_meetings,  meeting_error  = gather_meetings()
-    raw_journal,   journal_error  = gather_journal()
+    # Fetch from every API. Errors are captured, not raised,
+    # so a failed API call never stops the whole report.
+    print("  [1/3] Gathering LIVE data from APIs…")
+    raw_weather,   weather_error   = gather_weather()
+    raw_news,      news_error      = gather_news()
+    raw_currency,  currency_error  = gather_currency()
 
     # ── PROCESS ─────────────────────────────────────────────
-    # Transform raw data into summaries the presenter can use.
+    # Transform raw API data into summaries the presenter can use.
     print("  [2/3] Processing data…")
-    expense_summary  = process_expenses(raw_expenses)
-    todays_meetings  = process_meetings(raw_meetings)
-    mood_analysis    = process_journal(raw_journal)
+    weather_summary   = process_weather(raw_weather)
+    news_summary      = process_news(raw_news)
+    currency_summary  = process_currency(raw_currency)
 
     # ── PRESENT ─────────────────────────────────────────────
     # Assemble each section into one big report string.
     print("  [3/3] Generating report…\n")
     report = "\n".join([
         present_header(),
-        present_expenses(expense_summary,  expense_error),
-        present_meetings(todays_meetings,  meeting_error),
-        present_journal(mood_analysis,     journal_error),
+        present_weather(weather_summary,   weather_error),
+        present_news(news_summary,         news_error),
+        present_currency(currency_summary, currency_error),
         present_footer(),
     ])
 
@@ -395,7 +540,7 @@ def main():
     try:
         with open(REPORT_FILE, "w") as f:
             f.write(report)
-        print(f"\nReport saved → {REPORT_FILE}")
+        print(f"\n✓ Report saved → {REPORT_FILE}")
     except OSError as e:
         print(f"\n[!] Could not save report file: {e}")
 
