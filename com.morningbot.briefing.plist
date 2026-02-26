@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+============================================================
+LAUNCHD CONFIGURATION FILE (Property List)
+Morning Briefing Bot — Automated Daily Execution
+============================================================
+
+WHAT THIS FILE DOES:
+This .plist (Property List) file tells macOS's launchd system to
+automatically run your morning briefing bot every day at 7:00 AM.
+
+Think of it as a "recipe" that describes:
+  • WHAT to run (your Python script)
+  • WHEN to run it (7:00 AM daily)
+  • WHERE to save logs (stdout/stderr)
+  • HOW to handle errors (keep trying)
+
+ANATOMY OF A .plist FILE:
+.plist files are XML-based configuration files used throughout macOS.
+They store settings as key-value pairs in a structured format.
+
+KEY CONCEPTS:
+- <key>Label</key> → Unique identifier for this task
+- <key>ProgramArguments</key> → The actual command to run
+- <key>StartCalendarInterval</key> → When to trigger
+- <key>StandardOutPath</key> → Where to save normal output
+- <key>StandardErrorPath</key> → Where to save errors
+
+============================================================
+-->
+<plist version="1.0">
+<dict>
+    <!-- ═══════════════════════════════════════════════════
+         LABEL — Unique identifier for this scheduled task
+         ═══════════════════════════════════════════════════
+
+         Format: Reverse domain notation (like Java packages)
+         Example: com.company.appname
+
+         This must be UNIQUE across all launchd jobs on your Mac.
+         Use your own domain or personal identifier.
+    -->
+    <key>Label</key>
+    <string>com.morningbot.briefing</string>
+
+    <!-- ═══════════════════════════════════════════════════
+         PROGRAM ARGUMENTS — The actual command to execute
+         ═══════════════════════════════════════════════════
+
+         This is the command launchd will run, split into an array.
+         Each argument is a separate <string> element.
+
+         Equivalent to running in terminal:
+         /usr/bin/python3 /full/path/to/morning_briefing.py
+
+         ⚠️ IMPORTANT: Always use ABSOLUTE PATHS in launchd!
+         - Don't use ~ for home directory
+         - Don't use relative paths like ./script.py
+         - Specify the full path to python3
+
+         Why? launchd doesn't run in your user environment, so
+         it doesn't know about your PATH or home directory.
+    -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/admin/Desktop/Learning To Code/morning-bot/morning_briefing.py</string>
+    </array>
+
+    <!-- ═══════════════════════════════════════════════════
+         SCHEDULE — When to run this task
+         ═══════════════════════════════════════════════════
+
+         StartCalendarInterval: Run at specific clock times
+         (Similar to cron, but more readable)
+
+         Fields:
+         - Hour: 0-23 (24-hour format)
+         - Minute: 0-59
+         - Day: 1-31 (optional, for monthly tasks)
+         - Month: 1-12 (optional, for yearly tasks)
+         - Weekday: 0-7 (optional, 0=Sunday, 1=Mon, ... 7=Sun)
+
+         Examples:
+         7:00 AM daily     → <integer>7</integer> (Hour only)
+         3:30 PM daily     → Hour: 15, Minute: 30
+         Every Monday 9 AM → Hour: 9, Weekday: 1
+         1st of month      → Hour: 0, Day: 1
+
+         Our config: 7:00 AM every day
+    -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- ═══════════════════════════════════════════════════
+         LOGGING — Where to save output
+         ═══════════════════════════════════════════════════
+
+         StandardOutPath: Normal output (print statements)
+         StandardErrorPath: Error messages and exceptions
+
+         These files let you debug issues:
+         - Did the job run?
+         - Were there errors?
+         - What was printed?
+
+         Logs are APPENDED each time the job runs, so you get
+         a history of every execution.
+
+         Pro tip: Check these files if your bot isn't working!
+    -->
+    <key>StandardOutPath</key>
+    <string>/Users/admin/Desktop/Learning To Code/morning-bot/logs/briefing_output.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/admin/Desktop/Learning To Code/morning-bot/logs/briefing_error.log</string>
+
+    <!-- ═══════════════════════════════════════════════════
+         WORKING DIRECTORY — Where the script runs from
+         ═══════════════════════════════════════════════════
+
+         Sets the current working directory before running.
+         This ensures relative file paths in your script work correctly.
+
+         Without this, your script might look for files in
+         the wrong location!
+    -->
+    <key>WorkingDirectory</key>
+    <string>/Users/admin/Desktop/Learning To Code/morning-bot</string>
+
+    <!-- ═══════════════════════════════════════════════════
+         RUN AT LOAD — Execute immediately when loaded
+         ═══════════════════════════════════════════════════
+
+         If true: Runs once immediately when you load this .plist
+         If false: Waits for the scheduled time
+
+         Set to false for production (we only want 7 AM runs)
+         Set to true for testing (runs right away to test it works)
+
+         Current: false (production mode)
+    -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- ═══════════════════════════════════════════════════
+         ENVIRONMENT VARIABLES (Optional)
+         ═══════════════════════════════════════════════════
+
+         You can set environment variables here if needed.
+         Our bot uses .env file with python-dotenv, so we
+         don't need this. But here's how it works:
+
+         <key>EnvironmentVariables</key>
+         <dict>
+             <key>PATH</key>
+             <string>/usr/local/bin:/usr/bin:/bin</string>
+         </dict>
+    -->
+
+</dict>
+</plist>
