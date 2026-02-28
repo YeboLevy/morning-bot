@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
+from notifier import Notifier  # For desktop/email notifications
 
 # ── Load .env so we can use variables like USER_NAME and API keys ──
 # python-dotenv reads the .env file and injects its key=value
@@ -541,6 +542,21 @@ def main():
         with open(REPORT_FILE, "w") as f:
             f.write(report)
         print(f"\n✓ Report saved → {REPORT_FILE}")
+
+        # ── NOTIFY ──────────────────────────────────────────────
+        # Send desktop notification that briefing is ready
+        try:
+            notifier = Notifier()
+            notifier.send(
+                title="📰 Morning Briefing Ready",
+                message="Your daily briefing has been generated with live weather, news, and currency rates",
+                method="desktop",
+                urgency="info"
+            )
+        except Exception as notify_error:
+            # If notification fails, don't crash the bot
+            print(f"[!] Could not send notification: {notify_error}")
+
     except OSError as e:
         print(f"\n[!] Could not save report file: {e}")
 
