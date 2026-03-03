@@ -3,16 +3,16 @@
 <!--
 ============================================================
 LAUNCHD CONFIGURATION FILE (Property List)
-Morning Briefing Bot — Automated Daily Execution
+Morning Briefing Bot — Automated Execution on Wake/Unlock
 ============================================================
 
 WHAT THIS FILE DOES:
 This .plist (Property List) file tells macOS's launchd system to
-automatically run your morning briefing bot every day at 7:00 AM.
+automatically run your morning briefing bot when your Mac wakes up.
 
 Think of it as a "recipe" that describes:
   • WHAT to run (your Python script)
-  • WHEN to run it (7:00 AM daily)
+  • WHEN to run it (on wake/unlock, max once per hour)
   • WHERE to save logs (stdout/stderr)
   • HOW to handle errors (keep trying)
 
@@ -23,7 +23,8 @@ They store settings as key-value pairs in a structured format.
 KEY CONCEPTS:
 - <key>Label</key> → Unique identifier for this task
 - <key>ProgramArguments</key> → The actual command to run
-- <key>StartCalendarInterval</key> → When to trigger
+- <key>StartOnMount</key> → Trigger on wake/volume mount
+- <key>ThrottleInterval</key> → Minimum time between runs
 - <key>StandardOutPath</key> → Where to save normal output
 - <key>StandardErrorPath</key> → Where to save errors
 
@@ -69,34 +70,37 @@ KEY CONCEPTS:
     </array>
 
     <!-- ═══════════════════════════════════════════════════
-         SCHEDULE — When to run this task
+         TRIGGER — When to run this task
          ═══════════════════════════════════════════════════
 
-         StartCalendarInterval: Run at specific clock times
-         (Similar to cron, but more readable)
+         StartOnMount: Run when volumes mount (i.e., when Mac wakes)
 
-         Fields:
-         - Hour: 0-23 (24-hour format)
-         - Minute: 0-59
-         - Day: 1-31 (optional, for monthly tasks)
-         - Month: 1-12 (optional, for yearly tasks)
-         - Weekday: 0-7 (optional, 0=Sunday, 1=Mon, ... 7=Sun)
+         When true, this job runs when:
+         - Mac wakes from sleep
+         - Mac boots up
+         - External drives are mounted
 
-         Examples:
-         7:00 AM daily     → <integer>7</integer> (Hour only)
-         3:30 PM daily     → Hour: 15, Minute: 30
-         Every Monday 9 AM → Hour: 9, Weekday: 1
-         1st of month      → Hour: 0, Day: 1
-
-         Our config: 7:00 AM every day
+         This is perfect for a morning briefing that runs when you
+         start using your Mac, rather than at a fixed time.
     -->
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>7</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
+    <key>StartOnMount</key>
+    <true/>
+
+    <!-- ═══════════════════════════════════════════════════
+         THROTTLE — Prevent excessive runs
+         ═══════════════════════════════════════════════════
+
+         ThrottleInterval: Minimum seconds between runs
+
+         Set to 3600 (1 hour) to ensure the bot only runs once
+         per hour maximum, even if your Mac wakes/sleeps multiple
+         times.
+
+         This prevents spam and ensures you get fresh data each time,
+         not rapid-fire duplicates.
+    -->
+    <key>ThrottleInterval</key>
+    <integer>3600</integer>
 
     <!-- ═══════════════════════════════════════════════════
          LOGGING — Where to save output
