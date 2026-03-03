@@ -83,7 +83,7 @@ def load_daily_content():
     4. Saves yesterday's riddle answer for tomorrow
     5. Increments counters for next day
 
-    Returns: (location_dict, riddle_dict, yesterday_answer)
+    Returns: (location_dict, riddle_dict, yesterday_riddle, yesterday_answer)
     """
     try:
         # Load locations and riddles
@@ -120,7 +120,8 @@ def load_daily_content():
             today_location = locations[loc_idx % len(locations)]
             today_riddle = riddles[riddle_idx % len(riddles)]
 
-            # Save yesterday's answer for tomorrow
+            # Save yesterday's riddle and answer for tomorrow
+            yesterday_riddle = state.get("yesterday_riddle")
             yesterday_answer = state.get("yesterday_answer")
 
             # Update state for next day
@@ -134,7 +135,7 @@ def load_daily_content():
             with open(STATE_FILE, 'w') as f:
                 json.dump(state, f, indent=2)
 
-            return today_location, today_riddle, yesterday_answer
+            return today_location, today_riddle, yesterday_riddle, yesterday_answer
         else:
             # Same day - return current content without updating
             loc_idx = (state.get("location_index", 1) - 1) % len(locations)
@@ -142,13 +143,14 @@ def load_daily_content():
 
             today_location = locations[loc_idx]
             today_riddle = riddles[riddle_idx]
+            yesterday_riddle = state.get("yesterday_riddle")
             yesterday_answer = state.get("yesterday_answer")
 
-            return today_location, today_riddle, yesterday_answer
+            return today_location, today_riddle, yesterday_riddle, yesterday_answer
 
     except Exception as e:
         print(f"[!] Could not load daily content: {e}")
-        return None, None, None
+        return None, None, None, None
 
 # ============================================================
 # STEP 1 — GATHER
@@ -221,8 +223,7 @@ def gather_news():
     Requires an API key (get free at: https://newsapi.org)
 
     We fetch:
-      • Top 3 technology headlines (worldwide)
-      • Top 3 business headlines for South Africa
+      • Top 5 world news headlines
 
     API Docs: https://newsapi.org/docs/endpoints/top-headlines
 
@@ -235,31 +236,19 @@ def gather_news():
         return {}, "NEWS_API_KEY not found in .env file"
 
     try:
-        # Fetch technology news (worldwide, English)
-        tech_params = {
+        # Fetch world news (English)
+        world_params = {
             "apiKey":   api_key,
-            "category": "technology",
+            "category": "general",      # General/world news
             "language": "en",
-            "pageSize": 3,              # Only top 3 articles
+            "pageSize": 5,              # Top 5 articles
         }
-        tech_response = requests.get(NEWS_API_URL, params=tech_params, timeout=API_TIMEOUT)
-        tech_response.raise_for_status()
-        tech_data = tech_response.json()
-
-        # Fetch business news for South Africa
-        biz_params = {
-            "apiKey":   api_key,
-            "category": "business",
-            "country":  "za",           # ISO code for South Africa
-            "pageSize": 3,
-        }
-        biz_response = requests.get(NEWS_API_URL, params=biz_params, timeout=API_TIMEOUT)
-        biz_response.raise_for_status()
-        biz_data = biz_response.json()
+        world_response = requests.get(NEWS_API_URL, params=world_params, timeout=API_TIMEOUT)
+        world_response.raise_for_status()
+        world_data = world_response.json()
 
         return {
-            "tech": tech_data.get("articles", []),
-            "business": biz_data.get("articles", []),
+            "world": world_data.get("articles", []),
         }, None
 
     except requests.exceptions.Timeout:
@@ -487,23 +476,15 @@ def process_news(news_data):
     if not news_data:
         return None
 
-    tech_articles = []
-    for article in news_data.get("tech", [])[:3]:
-        tech_articles.append({
-            "title": article.get("title", "No title"),
-            "source": article.get("source", {}).get("name", "Unknown"),
-        })
-
-    biz_articles = []
-    for article in news_data.get("business", [])[:3]:
-        biz_articles.append({
+    world_articles = []
+    for article in news_data.get("world", [])[:5]:
+        world_articles.append({
             "title": article.get("title", "No title"),
             "source": article.get("source", {}).get("name", "Unknown"),
         })
 
     return {
-        "tech": tech_articles,
-        "business": biz_articles,
+        "world": world_articles,
     }
 
 
@@ -631,8 +612,8 @@ def present_weather(summary, error):
 
 
 def present_news(summary, error):
-    """PRESENT: Top headlines from tech and business."""
-    lines = ["--- NEWS HEADLINES " + "-" * 41, ""]
+    """PRESENT: Top world news headlines."""
+    lines = ["--- WORLD NEWS " + "-" * 45, ""]
 
     if error:
         lines += [f"  [!] {error}", ""]
@@ -642,26 +623,14 @@ def present_news(summary, error):
         lines += ["  No news available.", ""]
         return "\n".join(lines)
 
-    # Technology news
-    lines.append("  TECHNOLOGY:")
-    if summary.get("tech"):
-        for i, article in enumerate(summary["tech"], 1):
+    # World news
+    if summary.get("world"):
+        for i, article in enumerate(summary["world"], 1):
             lines.append(f"  {i}. {article['title']}")
             lines.append(f"     — {article['source']}")
             lines.append("")
     else:
-        lines.append("     No tech news available.")
-        lines.append("")
-
-    # Business news
-    lines.append("  BUSINESS (South Africa):")
-    if summary.get("business"):
-        for i, article in enumerate(summary["business"], 1):
-            lines.append(f"  {i}. {article['title']}")
-            lines.append(f"     — {article['source']}")
-            lines.append("")
-    else:
-        lines.append("     No business news available.")
+        lines.append("  No world news available.")
         lines.append("")
 
     return "\n".join(lines)
@@ -737,8 +706,8 @@ def present_daily_photo(location):
     return "\n".join(lines)
 
 
-def present_daily_riddle(riddle, yesterday_answer):
-    """PRESENT: Daily riddle and yesterday's answer."""
+def present_daily_riddle(riddle, yesterday_riddle, yesterday_answer):
+    """PRESENT: Daily riddle and yesterday's riddle with answer."""
     lines = ["--- DAILY RIDDLE " + "-" * 43, ""]
 
     if not riddle:
@@ -750,9 +719,12 @@ def present_daily_riddle(riddle, yesterday_answer):
     lines.append(f"  {riddle['riddle']}")
     lines.append("")
 
-    # Show yesterday's answer (if available)
-    if yesterday_answer:
-        lines.append("  💡 YESTERDAY'S ANSWER:")
+    # Show yesterday's riddle and answer (if available)
+    if yesterday_riddle and yesterday_answer:
+        lines.append("  💡 YESTERDAY'S RIDDLE:")
+        lines.append(f"  {yesterday_riddle}")
+        lines.append("")
+        lines.append("  ✅ ANSWER:")
         lines.append(f"  {yesterday_answer}")
         lines.append("")
 
@@ -775,7 +747,7 @@ def present_footer():
 # Send the briefing via email
 # ============================================================
 
-def send_briefing_email(report_file, report_content, location, riddle, yesterday_answer):
+def send_briefing_email(report_file, report_content, location, riddle, yesterday_riddle, yesterday_answer):
     """
     Email the morning briefing with the report attached.
 
@@ -784,6 +756,7 @@ def send_briefing_email(report_file, report_content, location, riddle, yesterday
     - report_content: The formatted report text
     - location: Today's exotic location dict
     - riddle: Today's riddle dict
+    - yesterday_riddle: Yesterday's riddle question
     - yesterday_answer: Yesterday's riddle answer
 
     EMAIL SENDING PROCESS:
@@ -832,10 +805,12 @@ def send_briefing_email(report_file, report_content, location, riddle, yesterday
         riddle_html = ""
         if riddle:
             yesterday_section = ""
-            if yesterday_answer:
+            if yesterday_riddle and yesterday_answer:
                 yesterday_section = f"""
                 <div style="background-color: #e8f5e9; padding: 15px; border-radius: 8px; margin-top: 20px; border-left: 4px solid #4caf50;">
-                    <p style="margin: 0; color: #2e7d32; font-weight: bold;">💡 Yesterday's Answer:</p>
+                    <p style="margin: 0; color: #2e7d32; font-weight: bold;">💡 Yesterday's Riddle:</p>
+                    <p style="margin: 10px 0; color: #1b5e20; font-size: 16px; font-style: italic;">{yesterday_riddle}</p>
+                    <p style="margin: 10px 0 0 0; color: #2e7d32; font-weight: bold;">✅ Answer:</p>
                     <p style="margin: 10px 0 0 0; color: #1b5e20; font-size: 16px;">{yesterday_answer}</p>
                 </div>
                 """
@@ -930,7 +905,7 @@ def main():
     # ── LOAD DAILY CONTENT ──────────────────────────────────
     # Get today's exotic location photo and riddle
     print("  [1/4] Loading daily photo and riddle…")
-    daily_location, daily_riddle, yesterday_answer = load_daily_content()
+    daily_location, daily_riddle, yesterday_riddle, yesterday_answer = load_daily_content()
 
     # ── GATHER ──────────────────────────────────────────────
     # Fetch from every API. Errors are captured, not raised,
@@ -955,7 +930,7 @@ def main():
     report = "\n".join([
         present_header(),
         present_daily_photo(daily_location),
-        present_daily_riddle(daily_riddle, yesterday_answer),
+        present_daily_riddle(daily_riddle, yesterday_riddle, yesterday_answer),
         present_weather(weather_summary,   weather_error),
         present_news(news_summary,         news_error),
         present_currency(currency_summary, currency_error),
@@ -989,7 +964,7 @@ def main():
 
         # ── EMAIL ───────────────────────────────────────────────
         # Email the briefing (if email is configured)
-        send_briefing_email(REPORT_FILE, report, daily_location, daily_riddle, yesterday_answer)
+        send_briefing_email(REPORT_FILE, report, daily_location, daily_riddle, yesterday_riddle, yesterday_answer)
 
     except OSError as e:
         print(f"\n[!] Could not save report file: {e}")
